@@ -1,0 +1,77 @@
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://tavlrxjnxdndikvwgjfk.supabase.co';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9K_os7K_9U4gwrQ507VmUg_OQeGDSqi';
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+export async function syncPODataToCloud(poList: any[]): Promise<boolean> {
+  try {
+    const payload = poList.map(item => ({
+      po_no: item.no,
+      supplier_name: item.supplierName,
+      order_date: item.date,
+      delivery_date: item.deliveryDate,
+      status: item.status || 'New',
+      lines: item.lines
+    }));
+    
+    // Attempt upsert in supabase table 'po_tracking_samples'
+    const { error } = await supabase
+      .from('po_tracking_samples')
+      .upsert(payload, { onConflict: 'po_no' });
+
+    if (error) {
+      console.error('Supabase Sync error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('syncPODataToCloud catch:', err);
+    return false;
+  }
+}
+
+export async function fetchPODataFromCloud(): Promise<any[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('po_tracking_samples')
+      .select('*')
+      .order('po_no', { ascending: false });
+
+    if (error) {
+      console.error('Supabase fetch error:', error);
+      return null;
+    }
+    
+    if (data) {
+      return data.map(item => ({
+        no: item.po_no,
+        supplierName: item.supplier_name,
+        date: item.order_date,
+        deliveryDate: item.delivery_date,
+        status: item.status,
+        lines: item.lines || [],
+        xeDate: '',
+        stockOutDate: '',
+        stockInDate: '',
+        deliveryNote: '',
+        supplierNo: '',
+        season: '',
+        orderNo: '',
+        modelNo: '',
+        note: '',
+        createdBy: '',
+        createDate: item.order_date || '',
+        verifiedBy: '',
+        verifiedDate: '',
+        approvedBy: '',
+        approveDate: ''
+      }));
+    }
+    return [];
+  } catch (err) {
+    console.error('fetchPODataFromCloud catch:', err);
+    return null;
+  }
+}
