@@ -13,14 +13,14 @@ export const Auth: React.FC = () => {
 
   const validateEmail = (emailStr: string): boolean => {
     const cleanEmail = emailStr.trim().toLowerCase();
-    return cleanEmail.endsWith('@properwell.com') || cleanEmail.endsWith('@properwell.com.vn');
+    return cleanEmail.endsWith('@properwell.com.cn') || cleanEmail.endsWith('@properwell.com.vn');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
-    
+
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
       setError('Vui lòng điền đầy đủ email và mật khẩu.');

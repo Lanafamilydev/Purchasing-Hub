@@ -49,6 +49,18 @@ const SHP_FIELDS = [
   { key: 'invPrice', label: 'Price', req: false, hints: ['price', 'unit price'] }
 ];
 
+const MRP_FIELDS = [
+  { key: 'orderNo', label: 'Order No', req: true, hints: ['order no', 'mo no', 'mk no', 'style', 'season'] },
+  { key: 'matNo', label: 'Mat No', req: true, hints: ['mat no', 'material no', 'item code'] },
+  { key: 'matName', label: 'Material Name', req: true, hints: ['material name', 'material', '品名'] },
+  { key: 'colorCN', label: 'Color CN', req: false, hints: ['color cn', '颜色'] },
+  { key: 'colorEN', label: 'Color EN', req: false, hints: ['color en'] },
+  { key: 'purchaseQty', label: 'Purchase Qty', req: true, hints: ['purchase qty', 'qty', '数量'] },
+  { key: 'poNo', label: 'PO No', req: false, hints: ['po no', 'purchase order'] },
+  { key: 'supplierName', label: 'Supplier', req: false, hints: ['supplier', 'vendor', 'ncc'] },
+  { key: 'deliveryDate', label: 'Delivery Date', req: false, hints: ['delivery', 'due date', 'etd'] },
+];
+
 export const POTracking: React.FC<POTrackingProps> = ({
   poData,
   setPoData,
@@ -125,7 +137,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
 
   // Column Mapper (Import) States
   const [showMapper, setShowMapper] = useState(false);
-  const [importType, setImportType] = useState<'po' | 'shp'>('po');
+  const [importType, setImportType] = useState<'po' | 'shp' | 'mrp'>('po');
   const [rawImport, setRawImport] = useState<ImportRaw>({ headers: [], rows: [], fname: '' });
   const [colMappings, setColMappings] = useState<Record<string, number>>({});
   const [poImportHist, setPoImportHist] = useState<ImportHist[]>([]);
@@ -658,7 +670,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
     
     // Auto mappings
     const mappings: Record<string, number> = {};
-    const fields = importType === 'po' ? PO_FIELDS : SHP_FIELDS;
+    const fields = importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS;
     
     fields.forEach(f => {
       const foundIdx = headers.findIndex(h =>
@@ -674,7 +686,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
   };
 
   const doImport = () => {
-    const fields = importType === 'po' ? PO_FIELDS : SHP_FIELDS;
+    const fields = importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS;
     const reqFields = fields.filter(f => f.req);
     const missing = reqFields.filter(f => colMappings[f.key] === undefined);
     
@@ -769,7 +781,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
       setPoData(updated);
       saveData(updated, shpData);
       
-    } else {
+    } else if (importType === 'shp') {
       const shpsMap: Record<string, Shipment> = {};
       shpData.forEach(s => { shpsMap[`${s.pono}||${s.invno}`] = s; });
 
@@ -836,11 +848,73 @@ export const POTracking: React.FC<POTrackingProps> = ({
       const updated = Object.values(shpsMap);
       setShpData(updated);
       saveData(poData, updated);
+    } else if (importType === 'mrp') {
+      // MRP Import: create PO entries from material requirements
+      const posMap: Record<string, POData> = {};
+      poData.forEach(p => { posMap[p.no] = p; });
+
+      rawImport.rows.forEach(row => {
+        const getV = (key: string, fb = ''): string => {
+          const idx = colMappings[key];
+          return idx !== undefined && row[idx] !== undefined ? String(row[idx]).trim() : fb;
+        };
+        const getN = (key: string, fb = 0): number => {
+          const idx = colMappings[key];
+          return idx !== undefined && row[idx] !== undefined ? parseNum(row[idx]) : fb;
+        };
+
+        const poNoVal = getV('poNo');
+        const matNo = getV('matNo');
+        const matName = getV('matName');
+        const qty = getN('purchaseQty');
+        if (!matNo || qty <= 0) return;
+
+        const pono = poNoVal || `MRP-${getV('orderNo', 'UNKNOWN')}`;
+
+        if (!posMap[pono]) {
+          newCount++;
+          posMap[pono] = {
+            no: pono,
+            date: todayStr,
+            deliveryDate: fixDate(getV('deliveryDate')),
+            xeDate: '', stockOutDate: '', stockInDate: '', deliveryNote: '',
+            status: 'Open', supplierNo: '',
+            supplierName: getV('supplierName', 'MRP Import'),
+            season: '', orderNo: getV('orderNo'), modelNo: '',
+            note: 'Imported from MRP',
+            createdBy: 'MRP Importer', createDate: todayStr,
+            verifiedBy: '', verifiedDate: '', approvedBy: '', approveDate: '',
+            lines: []
+          };
+        } else {
+          updCount++;
+        }
+
+        const po = posMap[pono];
+        const parsed = parseERPMatName(matName, matNo);
+        if (!po.lines.some(l => l.matNo === matNo)) {
+          po.lines.push({
+            matNo, matFull: matName,
+            thickness: parsed.thickness || '',
+            matCN: parsed.matCN || matName,
+            matEN: parsed.matEN || matName,
+            colorCN: parsed.colorCN || getV('colorCN'),
+            colorEN: parsed.colorEN || getV('colorEN'),
+            sizeRange: parsed.sizeRange || '', specNotes: '',
+            unit: parsed.unit || 'SF',
+            poQty: qty, allowanceQty: 0, amount: 0, currency: 'USD', stockInQty: 0
+          });
+        }
+      });
+
+      const mrpUpdated = Object.values(posMap);
+      setPoData(mrpUpdated);
+      saveData(mrpUpdated, shpData);
     }
 
     setPoImportHist(prev => [
       {
-        type: importType === 'po' ? 'PO Import' : 'Shp Import',
+        type: importType === 'po' ? 'PO Import' : importType === 'shp' ? 'Shp Import' : 'MRP Import',
         new: newCount,
         upd: updCount,
         time: new Date().toLocaleTimeString(),
@@ -905,11 +979,96 @@ export const POTracking: React.FC<POTrackingProps> = ({
     window.print();
   };
 
+  // ── EXPORT PO CSV ─────────────────────────────────────
+  const exportPOCSV = () => {
+    const headers = ['PO No','PO Date','Delivery Date','Supplier No','Supplier','Order No','Lines','PO Qty','Allowance','Amount USD','Shipments','Stock In','Status','Note'];
+    const rows = poData.map(p => [
+      p.no, fDate(p.date), fDate(p.deliveryDate), p.supplierNo, p.supplierName, p.orderNo || '',
+      p.lines.length, poTotalQty(p), poTotalAllow(p), poTotalAmt(p).toFixed(2),
+      shpByPO(p.no).length, poStockIn(p), poStatus(p), `"${(p.note || '').replace(/"/g, '""')}"`
+    ].join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `PO_Tracking_${getTodayString()}.csv`;
+    a.click();
+    triggerToast('✓ Đã xuất file PO CSV');
+  };
+
+  // ── EXPORT REPORT CSV ─────────────────────────────────
+  const exportReportCSV = () => {
+    const filtered = buildReportView.filtered;
+    const headers = ['PO No','Supplier','Order No','PO Date','Delivery','Status','Note','Line#','Mat No','Material EN','Color EN','Color CN','Thickness','PO Qty','Allowance','Unit','Price','Amount','Shipped','Remaining','Line Status'];
+    const rows: string[] = [];
+    filtered.forEach(po => {
+      const shpMap: Record<string, number> = {};
+      shpData.filter(s => s.pono === po.no).forEach(s =>
+        s.invLines.forEach(l => { if (l.matNo) shpMap[l.matNo] = (shpMap[l.matNo] || 0) + l.qty; })
+      );
+      po.lines.forEach((l, li) => {
+        const shipped = shpMap[l.matNo] || 0;
+        const rem = Math.max(0, l.poQty - shipped);
+        const lSt = shipped >= l.poQty ? 'Completed' : shipped > 0 ? 'Partial' : 'Pending';
+        const up = l.amount && l.poQty ? (l.amount / l.poQty) : 0;
+        rows.push([
+          po.no, po.supplierName, po.orderNo || '', fDate(po.date), fDate(po.deliveryDate), poStatus(po),
+          `"${(po.note || '').replace(/"/g, '""')}"`, li + 1, l.matNo, `"${l.matEN || ''}"`, l.colorEN || '', l.colorCN || '',
+          l.thickness || '', l.poQty, l.allowanceQty, l.unit, up ? up.toFixed(2) : '', l.amount.toFixed(2),
+          shipped, rem, lSt
+        ].join(','));
+      });
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `PO_Report_${getTodayString()}.csv`;
+    a.click();
+    triggerToast('✓ Đã xuất Report CSV');
+  };
+
+  // ── DOWNLOAD TEMPLATES ────────────────────────────────
+  const downloadTemplate = (type: 'po' | 'shp') => {
+    if (type === 'po') {
+      const h = ['PO No','PO Date','Delivery Date','Supplier No','Supplier Name','Order No','Status','Note','Mat No','Material Name','Color EN','Color CN','PO Qty','Allowance','Unit','Unit Price','Amount'];
+      const csv = [h.join(','), 'VNPP26030001,2026-03-01,2026-03-15,A087,PRIME,TEC1,Sample (样品),FOR TB,ANP07230001,"1.1-1.3MM 荔枝纹牛皮/LAVAZAA",W27-13,咖啡色,20,1,SF,3.19,'].join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })); a.download = 'Template_PO_Import.csv'; a.click();
+    } else {
+      const h = ['PO No','Invoice No','B/L No','Carrier','ETD','ETA','Status','Material Name','Color','Invoice Qty','Unit','Unit Price'];
+      const csv = [h.join(','), 'VNPP26030001,INV-2026-001,BL123456,Maersk,2026-03-05,2026-03-12,In Transit,LAVAZAA,W27-13,20,SF,3.19'].join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })); a.download = 'Template_Shipment_Import.csv'; a.click();
+    }
+    triggerToast(`✓ Đã tải template ${type === 'po' ? 'PO' : 'Shipment'}`);
+  };
+
+  // ── OPEN EMAIL REPORT ─────────────────────────────────
+  const openEmailReport = () => {
+    const typeLabel: Record<string, string> = { full: 'Full PO Status', pending: 'Outstanding POs', overdue: 'Overdue Delivery', 'by-supplier': 'Report by Supplier', shipment: 'Shipment Tracking' };
+    setEmSubject(`${typeLabel[rptType] || 'PO Report'} - PPW F26 Material Management - ${getTodayString()}`);
+    setEmTo('warehouse@properwell.com.vn; purchase@properwell.com.vn');
+    setEmMsg(`Hi Team,\n\nPlease find the ${(typeLabel[rptType] || 'PO report').toLowerCase()} attached below for your reference.\n\nBest Regards,\nPurchase Department`);
+    setEmailModalOpen(true);
+  };
+
+  // ── AUTO MAP COLUMNS ──────────────────────────────────
+  const autoMapCols = () => {
+    const fields = importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS;
+    const mappings: Record<string, number> = {};
+    fields.forEach(f => {
+      const foundIdx = rawImport.headers.findIndex(h =>
+        f.hints.some(hint => h.toLowerCase().includes(hint))
+      );
+      if (foundIdx !== -1) mappings[f.key] = foundIdx;
+    });
+    setColMappings(mappings);
+    triggerToast(`⚡ Đã tự động ánh xạ ${Object.keys(mappings).length} cột`);
+  };
+
   return (
     <div className="page active" id="pg-po">
       <div className="topbar">
         <div className="pg-title">📦 PO Tracking — Hàng Mẫu</div>
         <div style={{ display: 'flex', gap: '7px' }}>
+          <button className="btn btn-g btn-sm" onClick={exportPOCSV}><Download size={14} /> CSV</button>
           <button className="btn btn-g btn-sm" onClick={handleCloudFetch}><Cloud size={14} /> Tải từ Cloud</button>
           <button className="btn btn-g btn-sm" onClick={handleCloudSync}><Cloud size={14} /> Đồng bộ Cloud</button>
           <button className="btn btn-p btn-sm" onClick={() => openPOModal()}><Plus size={14} /> Thêm PO Mới</button>
@@ -1332,19 +1491,22 @@ export const POTracking: React.FC<POTrackingProps> = ({
                   <div className="ic-title">Import dữ liệu PO và Lô hàng</div>
                   <div className="ic-sub">Hỗ trợ định dạng file Excel (.xlsx, .xls) và CSV.</div>
                 </div>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-                  <select value={importType} onChange={e => setImportType(e.target.value as 'po' | 'shp')}>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select value={importType} onChange={e => setImportType(e.target.value as 'po' | 'shp' | 'mrp')}>
                     <option value="po">Kiểu: Import PO mẫu</option>
                     <option value="shp">Kiểu: Import Lô hàng</option>
+                    <option value="mrp">Kiểu: Import MRP</option>
                   </select>
+                  <button className="btn btn-g btn-xs" onClick={() => downloadTemplate('po')} title="Tải template PO"><Download size={12} /> Template PO</button>
+                  <button className="btn btn-g btn-xs" onClick={() => downloadTemplate('shp')} title="Tải template Shipment"><Download size={12} /> Template Shp</button>
                 </div>
               </div>
               <div className="ic-body">
                 <div className="drop-zone" style={{ borderStyle: 'dashed' }}>
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handlePoFileImport} />
+                  <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={handlePoFileImport} />
                   <span className="dz-icon" style={{ fontSize: '26px' }}>📂</span>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--txt2)' }}>Kéo thả hoặc click để chọn file import</div>
-                  <div style={{ fontSize: '11px', color: 'var(--txt3)', marginTop: '3px' }}>.xlsx · .xls · .csv</div>
+                  <div style={{ fontSize: '11px', color: 'var(--txt3)', marginTop: '3px' }}>.xlsx · .xls · .csv · .txt</div>
                 </div>
               </div>
             </div>
@@ -1386,15 +1548,39 @@ export const POTracking: React.FC<POTrackingProps> = ({
                     File: {rawImport.fname} ({rawImport.rows.length} dòng dữ liệu)
                   </div>
                 </div>
-                <div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span className="badge b-blue" style={{ fontSize: '11px', padding: '4px 8px' }}>
-                    Chế độ: {importType === 'po' ? 'Import PO' : 'Import Shipment'}
+                    Chế độ: {importType === 'po' ? 'Import PO' : importType === 'shp' ? 'Import Shipment' : 'Import MRP'}
                   </span>
+                  <button className="btn btn-g btn-xs" onClick={autoMapCols}>⚡ Auto Map</button>
                 </div>
               </div>
+
+              {/* Raw Data Preview */}
+              {rawImport.rows.length > 0 && (
+                <div style={{ marginBottom: '12px', border: '1px solid var(--brd)', borderRadius: '6px', overflow: 'hidden' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 700, padding: '5px 10px', background: 'var(--s3)', color: 'var(--txt3)' }}>Xem trước dữ liệu gốc (5 dòng đầu)</div>
+                  <div className="tw" style={{ maxHeight: '160px' }}>
+                    <table style={{ fontSize: '10px' }}>
+                      <thead>
+                        <tr>
+                          {rawImport.headers.map((h, i) => <th key={i} style={{ whiteSpace: 'nowrap', padding: '3px 6px' }}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rawImport.rows.slice(0, 5).map((row, rIdx) => (
+                          <tr key={rIdx}>
+                            {rawImport.headers.map((_, cIdx) => <td key={cIdx} style={{ padding: '3px 6px', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row[cIdx] != null ? String(row[cIdx]) : ''}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               
               <div id="col-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
-                {(importType === 'po' ? PO_FIELDS : SHP_FIELDS).map(f => {
+                {(importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS).map(f => {
                   return (
                     <div key={f.key} className="fld" style={{ background: 'var(--s2)', padding: '8px', borderRadius: '6px', border: '1px solid var(--brd)' }}>
                       <label style={{ color: 'var(--txt2)', fontWeight: 600 }}>
@@ -1462,6 +1648,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
                   <option value="full">Báo cáo PO đầy đủ (Full Status)</option>
                   <option value="pending">PO chưa hoàn thành (Outstanding)</option>
                   <option value="overdue">PO bị quá hạn giao (Overdue)</option>
+                  <option value="by-supplier">Theo Nhà cung cấp (By Supplier)</option>
                   <option value="shipment">Chi tiết Lô hàng (Shipment Tracking)</option>
                 </select>
               </div>
@@ -1472,6 +1659,17 @@ export const POTracking: React.FC<POTrackingProps> = ({
                   {suppliersList.map((s, idx) => (
                     <option key={idx} value={s}>{s}</option>
                   ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '120px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--txt2)', fontWeight: 600 }}>Lọc trạng thái</label>
+                <select value={rptSt} onChange={e => setRptSt(e.target.value)}>
+                  <option value="">Tất cả</option>
+                  <option>Sample (样品)</option>
+                  <option>Open</option>
+                  <option>In Transit</option>
+                  <option>Arrived</option>
+                  <option>Completed</option>
                 </select>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -1491,6 +1689,8 @@ export const POTracking: React.FC<POTrackingProps> = ({
                 <input type="text" value={rptBy} onChange={e => setRptBy(e.target.value)} style={{ width: '120px' }} />
               </div>
               <button className="btn btn-p btn-sm" onClick={handlePrint}><Printer size={14} /> In Báo cáo</button>
+              <button className="btn btn-g btn-sm" onClick={exportReportCSV}><Download size={14} /> CSV</button>
+              <button className="btn btn-g btn-sm" onClick={openEmailReport}><Mail size={14} /> Email</button>
             </div>
           </div>
 
@@ -1508,7 +1708,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
               </div>
             </div>
             
-            <div className="rpt-kpi" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
+            <div className="rpt-kpi" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
               <div className="rpt-kc">
                 <div className="rpt-kl">Tổng số PO</div>
                 <div className="rpt-kv">{buildReportView.totPO}</div>
@@ -1525,36 +1725,57 @@ export const POTracking: React.FC<POTrackingProps> = ({
                 <div className="rpt-kl">Đã giao vận chuyển</div>
                 <div className="rpt-kv">{buildReportView.totShipped.toLocaleString()}</div>
               </div>
+              <div className="rpt-kc">
+                <div className="rpt-kl">Quá hạn</div>
+                <div className="rpt-kv" style={{ color: 'var(--red)' }}>
+                  {buildReportView.filtered.filter(p => {
+                    const d = getDaysFromToday(p.deliveryDate);
+                    return d !== null && d < 0 && poStatus(p) !== 'Completed';
+                  }).length}
+                </div>
+              </div>
             </div>
 
             {rptType === 'shipment' ? (
               <div style={{ padding: '10px' }}>
+                <div style={{ background: 'var(--s2)', padding: '8px 15px', borderTop: '2px solid var(--acc2)', fontWeight: 700, color: 'var(--acc2)' }}>Shipment Tracking Details</div>
                 <table className="rt">
                   <thead>
                     <tr>
-                      <th>Invoice No</th>
+                      <th>Invoice</th>
                       <th>PO No</th>
+                      <th>Supplier</th>
                       <th>Carrier</th>
-                      <th>Dòng</th>
-                      <th>Số lượng</th>
+                      <th>Lines</th>
+                      <th>Qty</th>
                       <th>ETD</th>
                       <th>ETA</th>
-                      <th>Trạng thái</th>
+                      <th>Status</th>
+                      <th>Notified</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredShps.map((s, idx) => (
-                      <tr key={idx}>
-                        <td className="mono">{s.invno}</td>
-                        <td className="mono">{s.pono}</td>
-                        <td>{s.carrier || '—'}</td>
-                        <td>{s.invLines.length}</td>
-                        <td className="mono">{shpTotalQty(s).toLocaleString()}</td>
-                        <td className="mono">{fDate(s.etd)}</td>
-                        <td className="mono">{fDate(s.eta)}</td>
-                        <td>{s.status}</td>
-                      </tr>
-                    ))}
+                    {shpData.filter(s => buildReportView.filtered.some(p => p.no === s.pono)).sort((a, b) => new Date(a.eta).getTime() - new Date(b.eta).getTime()).map((s, idx) => {
+                      const po = poData.find(p => p.no === s.pono);
+                      return (
+                        <tr key={idx}>
+                          <td className="mono">{s.invno}</td>
+                          <td className="mono">{s.pono}</td>
+                          <td>{po ? po.supplierName : '—'}</td>
+                          <td>{s.carrier || '—'}</td>
+                          <td className="mono">{s.invLines.length}</td>
+                          <td className="mono">{shpTotalQty(s).toLocaleString()}</td>
+                          <td className="mono">{fDate(s.etd)}</td>
+                          <td className="mono">{fDate(s.eta)}</td>
+                          <td>
+                            <span className={`bdg ${s.status === 'Delivered' ? 'b-ok' : s.status === 'In Transit' ? 'b-blue' : 'b-gray'}`}>
+                              {s.status}
+                            </span>
+                          </td>
+                          <td>{s.notified ? '✓' : '—'}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1606,11 +1827,12 @@ export const POTracking: React.FC<POTrackingProps> = ({
       {detModalOpen && (
         <div className="mb open">
           <div className="modal modal-lg">
-            <div className="mh">
+            <div className="mh" style={{ alignItems: 'flex-start' }}>
               <div>
                 <div className="mt">Chi tiết PO: {selectedPONo}</div>
-                <div className="ms">
-                  {poData.find(p => p.no === selectedPONo)?.supplierName} · {poData.find(p => p.no === selectedPONo)?.lines.length} Dòng vật tư
+                <div className="ms" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span>{poData.find(p => p.no === selectedPONo)?.supplierName} · {poData.find(p => p.no === selectedPONo)?.lines.length} Dòng vật tư</span>
+                  <span style={{ fontSize: '11px', color: 'var(--txt3)' }}>{poData.find(p => p.no === selectedPONo)?.note || ''}</span>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -1656,13 +1878,21 @@ export const POTracking: React.FC<POTrackingProps> = ({
                       <div className="dp-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                         <div><div className="dp-l">Ngày lập</div><div className="dp-v">{fDate(po.date)}</div></div>
                         <div><div className="dp-l">Hạn giao</div><div className="dp-v">{fDate(po.deliveryDate)}</div></div>
-                        <div><div className="dp-l">Tổng lượng đặt</div><div className="dp-v">{tot.toLocaleString()} SF</div></div>
+                        <div><div className="dp-l">Tổng lượng đặt</div><div className="dp-v">{tot.toLocaleString()} SF + {poTotalAllow(po).toLocaleString()} allow</div></div>
                         <div><div className="dp-l">Trị giá PO</div><div className="dp-v">${amt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
                         <div><div className="dp-l">Nhà cung cấp</div><div className="dp-v">{po.supplierName} ({po.supplierNo})</div></div>
                         <div><div className="dp-l">Mã Đơn (Order No)</div><div className="dp-v">{po.orderNo || '—'}</div></div>
-                        <div><div className="dp-l">Số lượng đã nhập</div><div className="dp-v">{si.toLocaleString()} SF</div></div>
+                        <div><div className="dp-l">Đã giao vận chuyển</div><div className="dp-v" style={{ color: poShipTotal(po.no) >= tot ? 'var(--green)' : 'var(--amber)' }}>{poShipTotal(po.no).toLocaleString()} / {tot.toLocaleString()}</div></div>
+                        <div><div className="dp-l">Nhập kho</div><div className="dp-v" style={{ color: si >= tot ? 'var(--green)' : 'var(--amber)' }}>{si.toLocaleString()} SF</div></div>
                         <div><div className="dp-l">Số lô vận chuyển</div><div className="dp-v">{shps.length} lô</div></div>
+                        <div><div className="dp-l">Tổng Invoice</div><div className="dp-v">${shps.reduce((a, s) => a + shpTotalAmt(s), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div></div>
+                        <div><div className="dp-l">Created</div><div className="dp-v">{fDate(po.createDate)}</div></div>
+                        <div><div className="dp-l">Approved</div><div className="dp-v">{fDate(po.approveDate)}</div></div>
                       </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', gap: '10px' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--txt3)' }}>{po.lines.length} material lines · {po.note || 'No note'}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--txt3)' }}>{shps.length} shipments · {shps.reduce((a, s) => a + shpTotalQty(s), 0).toLocaleString()} SF</div>
                     </div>
 
                     <h4 style={{ fontSize: '13px', fontWeight: 700, margin: '14px 0 6px' }}>Danh sách Vật tư (PO Lines)</h4>
@@ -1673,71 +1903,124 @@ export const POTracking: React.FC<POTrackingProps> = ({
                             <tr>
                               <th>#</th>
                               <th>Mã vật tư</th>
-                              <th>Tên tiếng Anh</th>
                               <th>Tên tiếng Trung</th>
-                              <th>Màu EN</th>
+                              <th>Tên tiếng Anh</th>
                               <th>Màu CN</th>
+                              <th>Màu EN</th>
                               <th>Dày/Khổ</th>
-                              <th>Đơn giá</th>
-                              <th>Đặt hàng</th>
-                              <th>Dung sai</th>
-                              <th>Nhập kho</th>
+                              <th>Size</th>
+                              <th>PO Qty</th>
+                              <th>Allow.</th>
+                              <th>Unit</th>
+                              <th>Price</th>
+                              <th>Amount</th>
+                              <th>Stock In</th>
+                              <th>Remaining</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {po.lines.map((l, lIdx) => (
+                            {po.lines.map((l, lIdx) => {
+                              const rem = Math.max(0, l.poQty - (l.stockInQty || 0));
+                              const price = l.poQty > 0 ? l.amount / l.poQty : 0;
+                              return (
                               <tr key={lIdx}>
                                 <td>{lIdx + 1}</td>
                                 <td className="mono" style={{ fontSize: '10px' }}>{l.matNo}</td>
-                                <td>{l.matEN}</td>
                                 <td>{l.matCN}</td>
-                                <td><span className="bdg b-blue">{l.colorEN}</span></td>
+                                <td>{l.matEN}</td>
                                 <td><span className="bdg b-gray">{l.colorCN}</span></td>
-                                <td className="mono" style={{ fontSize: '10px' }}>{[l.thickness, l.sizeRange].filter(Boolean).join(' · ')}</td>
-                                <td className="mono">${l.poQty > 0 ? (l.amount / l.poQty).toFixed(2) : '0'}</td>
-                                <td className="mono" style={{ fontWeight: 600 }}>{l.poQty.toLocaleString()} {l.unit}</td>
+                                <td><span className="bdg b-blue">{l.colorEN}</span></td>
+                                <td className="mono" style={{ fontSize: '10px' }}>{l.thickness || '—'}</td>
+                                <td className="mono" style={{ fontSize: '10px' }}>{l.sizeRange || '—'}</td>
+                                <td className="mono" style={{ fontWeight: 600 }}>{l.poQty.toLocaleString()}</td>
                                 <td className="mono" style={{ color: 'var(--txt3)' }}>+{l.allowanceQty}</td>
+                                <td className="mono">{l.unit}</td>
+                                <td className="mono">${price.toFixed(2)}</td>
+                                <td className="mono">${l.amount.toFixed(2)}</td>
                                 <td className="mono" style={{ color: l.stockInQty >= l.poQty ? 'var(--green)' : 'var(--amber)' }}>{l.stockInQty}</td>
+                                <td className="mono" style={{ color: rem > 0 ? 'var(--amber)' : 'var(--green)' }}>{rem}</td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
                     </div>
 
                     <h4 style={{ fontSize: '13px', fontWeight: 700, margin: '14px 0 6px' }}>Chứng từ Shipments (Lô hàng đã liên kết)</h4>
-                    {shps.length > 0 ? shps.map((s, sIdx) => (
+                    {shps.length > 0 ? (
+                      <div style={{ fontSize: '11px', color: 'var(--txt3)', marginBottom: '8px' }}>{shps.length} lô hàng · Tổng {shps.reduce((sum, s) => sum + shpTotalQty(s), 0).toLocaleString()} SF</div>
+                    ) : null}
+                    {shps.length > 0 ? shps.map((s, sIdx) => {
+                      const sTot = shpTotalQty(s);
+                      const sAmt = shpTotalAmt(s);
+                      return (
                       <div key={sIdx} className="shpc" style={{ border: '1px solid var(--brd)', borderRadius: '8px', marginBottom: '8px', padding: '10px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 'bold' }}>Invoice: {s.invno} (Số lô: {s.no})</span>
-                          <span style={{ fontSize: '11px', color: 'var(--txt2)' }}>ETA: {fDate(s.eta)} · Trạng thái: {s.status}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 'bold' }}>Shp {sIdx + 1}</span>
+                            <span className="mono" style={{ fontWeight: 600 }}>{s.invno}</span>
+                            <span style={{ fontSize: '10px', color: 'var(--txt3)' }}>{sTot.toLocaleString()} SF · ${sAmt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span className={`bdg ${s.status === 'Delivered' ? 'b-ok' : s.status === 'In Transit' ? 'b-blue' : 'b-gray'}`}>{s.status}</span>
+                            {s.notified ? <span className="bdg b-ok">Notified</span> : <span className="bdg b-amber">⚠</span>}
+                            <span className="mono" style={{ fontSize: '10px', color: 'var(--txt3)' }}>ETD {fDate(s.etd)} → ETA {fDate(s.eta)}</span>
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', fontSize: '10px', marginBottom: '8px', padding: '6px 8px', background: 'var(--s3)', borderRadius: '6px' }}>
+                          <div><span style={{ color: 'var(--txt3)' }}>B/L No:</span> <span className="mono">{s.blno || '—'}</span></div>
+                          <div><span style={{ color: 'var(--txt3)' }}>Carrier:</span> {s.carrier || '—'}</div>
+                          <div><span style={{ color: 'var(--txt3)' }}>Route:</span> {s.pol || '—'} → {s.pod || '—'}</div>
+                          <div><span style={{ color: 'var(--txt3)' }}>Forwarder:</span> {s.fwd || '—'}</div>
                         </div>
                         <div className="tw">
                           <table className="lt">
                             <thead>
                               <tr>
+                                <th>#</th>
                                 <th>Mã vật tư</th>
                                 <th>Vật liệu</th>
                                 <th>Màu sắc</th>
                                 <th style={{ textAlign: 'right' }}>Số lượng</th>
-                                <th>Đơn vị</th>
+                                <th>ĐVT</th>
+                                <th style={{ textAlign: 'right' }}>Đơn giá</th>
+                                <th style={{ textAlign: 'right' }}>Trị giá</th>
                               </tr>
                             </thead>
                             <tbody>
                               {s.invLines.map((il, ilIdx) => (
                                 <tr key={ilIdx}>
+                                  <td className="ln">{ilIdx + 1}</td>
                                   <td className="mono">{il.matNo}</td>
                                   <td>{il.material}</td>
-                                  <td>{il.color}</td>
-                                  <td className="mono" style={{ textAlign: 'right' }}>{il.qty.toLocaleString()}</td>
+                                  <td><span className="bdg b-gray" style={{ fontSize: '9px' }}>{il.color}</span></td>
+                                  <td className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{il.qty.toLocaleString()}</td>
                                   <td>{il.unit}</td>
+                                  <td className="mono" style={{ textAlign: 'right' }}>{il.price ? `$${il.price.toFixed(2)}` : '—'}</td>
+                                  <td className="mono" style={{ textAlign: 'right' }}>{il.price ? `$${(il.qty * il.price).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
+                        {(s.docs || []).length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '6px' }}>
+                            {s.docs.map((d, di) => <span key={di} className="bdg b-gray" style={{ fontSize: '9px' }}>📄 {d}</span>)}
+                          </div>
+                        )}
+                        {(s.pic || s.acc) && (
+                          <div style={{ fontSize: '10px', marginTop: '5px', padding: '4px 8px', background: 'rgba(0,212,170,.08)', borderRadius: '4px' }}>
+                            📢 {[s.pic, s.acc].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '5px', marginTop: '7px', paddingTop: '7px', borderTop: '1px solid var(--brd)' }}>
+                          <button className="btn btn-g btn-sm" onClick={() => { setDetModalOpen(false); openShpModal(shpData.indexOf(s)); }}>Sửa</button>
+                          <button className="btn btn-d btn-sm" onClick={() => confirmDelete('shp', shpData.indexOf(s))}>✕</button>
+                        </div>
                       </div>
-                    )) : <p style={{ fontSize: '11px', color: 'var(--txt3)', fontStyle: 'italic' }}>Chưa có lô hàng nào liên kết.</p>}
+                      );
+                    }) : <p style={{ fontSize: '11px', color: 'var(--txt3)', fontStyle: 'italic' }}>Chưa có lô hàng nào liên kết.</p>}
                   </div>
                 );
               })()}
