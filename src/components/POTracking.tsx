@@ -1543,9 +1543,9 @@ export const POTracking: React.FC<POTrackingProps> = ({
             <div className="import-card" style={{ padding: '14px 16px', marginTop: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                 <div>
-                  <div style={{ fontSize: '13px', fontWeight: 700 }}>Ánh xạ các cột trong file</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700 }}>Ánh xạ cột</div>
                   <div style={{ fontSize: '11px', color: 'var(--txt3)' }}>
-                    File: {rawImport.fname} ({rawImport.rows.length} dòng dữ liệu)
+                    File: {rawImport.fname} {selectedSheet ? `[${selectedSheet}]` : ''} · {rawImport.headers.length} cols · {rawImport.rows.length} rows
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -1579,12 +1579,19 @@ export const POTracking: React.FC<POTrackingProps> = ({
                 </div>
               )}
               
-              <div id="col-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+              <div id="col-map-grid" className="fg4" style={{ marginBottom: '12px' }}>
                 {(importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS).map(f => {
+                  const sampleVal = colMappings[f.key] !== undefined
+                    ? (() => {
+                        const idx = colMappings[f.key];
+                        const vals = rawImport.rows.slice(0, 3).map(r => r[idx] || '').filter(Boolean).slice(0, 2);
+                        return vals.length ? `e.g. ${vals.join(', ')}` : '(empty)';
+                      })()
+                    : '(empty)';
                   return (
-                    <div key={f.key} className="fld" style={{ background: 'var(--s2)', padding: '8px', borderRadius: '6px', border: '1px solid var(--brd)' }}>
-                      <label style={{ color: 'var(--txt2)', fontWeight: 600 }}>
-                        {f.label} {f.req && <span className="req">*</span>}
+                    <div key={f.key} className="fld" style={{ background: 'var(--s2)', border: '1px solid var(--brd)', borderRadius: '8px', padding: '8px 10px' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--txt)', marginBottom: '4px', textTransform: 'none', letterSpacing: 'normal', display: 'block' }}>
+                        {f.label}{f.req && <span className="req" style={{ color: 'var(--acc)', marginLeft: '3px' }}>*</span>}
                       </label>
                       <select
                         value={colMappings[f.key] !== undefined ? colMappings[f.key] : ''}
@@ -1600,13 +1607,16 @@ export const POTracking: React.FC<POTrackingProps> = ({
                             return next;
                           });
                         }}
-                        style={{ fontSize: '11px', padding: '3px 6px' }}
+                        style={{ fontSize: '11px', width: '100%', background: 'var(--s2)', border: '1px solid var(--brd2)', borderRadius: '7px', color: '#fff', padding: '5px 8px', outline: 'none' }}
                       >
                         <option value="">— Bỏ qua / Không ánh xạ —</option>
                         {rawImport.headers.map((h, hIdx) => (
                           <option key={hIdx} value={hIdx}>Cột: {h}</option>
                         ))}
                       </select>
+                      <div style={{ fontSize: '9px', color: 'var(--txt3)', fontFamily: 'var(--mono)', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minHeight: '12px' }}>
+                        {sampleVal}
+                      </div>
                     </div>
                   );
                 })}
