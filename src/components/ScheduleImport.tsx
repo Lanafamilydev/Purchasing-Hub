@@ -255,21 +255,29 @@ export const ScheduleImport: React.FC<ScheduleImportProps> = ({
         UNIT: isVersion03 ? 6 : 7,
         PURCHASE_QTY: isVersion03 ? 9 : 10,
         STOCK_IN_QTY: isVersion03 ? 14 : 15,
-        PO_NO: isVersion03 ? 16 : 17,
-        PART_CN: isVersion03 ? 17 : 18,
-        PART_VN: isVersion03 ? 18 : 19,
-        SUPPLIER: isVersion03 ? 19 : 20,
-        SUPPLIER_NO: isVersion03 ? 20 : 21,
-        ETD: isVersion03 ? 22 : 23,
-        ETA: isVersion03 ? 23 : 24,
-        INV_NO: isVersion03 ? 24 : 25,
-        ACTUAL_IMPORT: isVersion03 ? 27 : 28
+        LACKING_QTY: isVersion03 ? 15 : 16,
+        PO_NO: isVersion03 ? 18 : 19,
+        PART_CN: isVersion03 ? 19 : 20,
+        PART_VN: isVersion03 ? 20 : 21,
+        CLASS_NO: isVersion03 ? 27 : 28,
+        SUPPLIER_NO: isVersion03 ? 32 : 33,
+        SUPPLIER: isVersion03 ? 33 : 34,
+        ETD1: isVersion03 ? 34 : 35,
+        ETA1: isVersion03 ? 35 : 36,
+        ETD2: isVersion03 ? 36 : -1,
+        ETA2: isVersion03 ? 37 : -1,
+        ETD3: isVersion03 ? 38 : -1,
+        ETA3: isVersion03 ? 39 : -1,
+        IMPORT_QTY: isVersion03 ? 50 : (shName.toUpperCase() === 'CUTUP' ? 44 : 50),
+        INV_NO: isVersion03 ? 53 : -1,
+        ACTUAL_IMPORT: isVersion03 ? 54 : -1,
       };
       
       const range = XLSX.utils.decode_range(ws['!ref']);
       const nrows = range.e.r + 1;
       
       const getVal = (r: number, c: number): any => {
+        if (c < 0) return null;
         const cell = ws[XLSX.utils.encode_cell({ r, c })];
         return cell ? cell.v : null;
       };
@@ -286,23 +294,34 @@ export const ScheduleImport: React.FC<ScheduleImportProps> = ({
         const matName = strVal(r, C.MAT_NAME);
         const purchaseQty = parseNum(getVal(r, C.PURCHASE_QTY));
         
-        // Handle dates
+        // Handle dates (supporting multiple ETD/ETA columns)
         let latestEtd: Date | null = null;
         let latestEta: Date | null = null;
         
-        const etdVal = getVal(r, C.ETD);
-        if (etdVal) {
-          const fd = fixDate(etdVal);
-          if (fd) latestEtd = new Date(fd);
+        const etds = [C.ETD1, C.ETD2, C.ETD3].filter(c => c >= 0).map(c => fixDate(getVal(r, c))).filter(Boolean);
+        const etas = [C.ETA1, C.ETA2, C.ETA3].filter(c => c >= 0).map(c => fixDate(getVal(r, c))).filter(Boolean);
+        
+        if (etds.length) {
+          latestEtd = new Date(etds[etds.length - 1]);
         }
-        const etaVal = getVal(r, C.ETA);
-        if (etaVal) {
-          const fd = fixDate(etaVal);
-          if (fd) latestEta = new Date(fd);
+        if (etas.length) {
+          latestEta = new Date(etas[etas.length - 1]);
         }
         
-        const effectiveStockIn = parseNum(getVal(r, C.STOCK_IN_QTY));
+        const shipped = parseNum(getVal(r, C.IMPORT_QTY));
+        const stockIn = parseNum(getVal(r, C.STOCK_IN_QTY));
+        const effectiveStockIn = shipped > 0 ? shipped : stockIn;
         const parsed = parseERPMatName(matName, matNo);
+        
+        // Class code based material type detection fallback
+        const classCode = strVal(r, C.CLASS_NO);
+        let matType = parsed.matType || 'UNKNOWN';
+        if (matType === 'UNKNOWN' && classCode) {
+          if (/^APU/i.test(classCode)) matType = 'PU';
+          else if (/^APV/i.test(classCode)) matType = 'PVC';
+          else if (/^ABL|^ATX|^ATH/i.test(classCode)) matType = 'FABRIC';
+          else if (/^ANP|^AYP|^ACP/i.test(classCode)) matType = 'LEATHER';
+        }
         
         lines.push({
           order_no: oNo,
@@ -310,7 +329,7 @@ export const ScheduleImport: React.FC<ScheduleImportProps> = ({
           color_no: strVal(r, C.COLOR_NO),
           mat_no: matNo,
           mat_name: matName,
-          mat_type: parsed.matType || 'UNKNOWN',
+          mat_type: matType,
           mat_cn: parsed.matCN || matName,
           mat_en: parsed.matEN || '',
           color_cn: parsed.colorCN || '',
@@ -332,7 +351,9 @@ export const ScheduleImport: React.FC<ScheduleImportProps> = ({
           eta: latestEta,
           stock_in_date: latestEta,
           inv_no: strVal(r, C.INV_NO),
-          actual_import_qty: parseNum(getVal(r, C.ACTUAL_IMPORT)) || effectiveStockIn,
+          actual_import_qty: (C.ACTUAL_IMPORT >= 0 && parseNum(getVal(r, C.ACTUAL_IMPORT)) > 0)
+            ? parseNum(getVal(r, C.ACTUAL_IMPORT))
+            : effectiveStockIn,
           sheet: shName
         });
       }

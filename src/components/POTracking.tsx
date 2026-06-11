@@ -641,12 +641,48 @@ export const POTracking: React.FC<POTrackingProps> = ({
     
     try {
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true, dateNF: 'yyyy-mm-dd' });
       setTempWorkBook(wb);
       setSheetsList(wb.SheetNames);
-      setSelectedSheet(wb.SheetNames[0]);
-      setPoSheetSelOpen(true);
+      
+      const defaultSheet = wb.SheetNames[0];
+      setSelectedSheet(defaultSheet);
       setRawImport(prev => ({ ...prev, fname: file.name }));
+
+      // If workbook has only one sheet, bypass sheet selection modal
+      if (wb.SheetNames.length === 1) {
+        const ws = wb.Sheets[defaultSheet];
+        const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd', defval: '' });
+        
+        if (data.length === 0) {
+          triggerToast('⚠ Sheet này rỗng!');
+          return;
+        }
+        
+        const headers = data[0].map(h => String(h || '').trim());
+        const rows = data.slice(1);
+        
+        setRawImport({ headers, rows, fname: file.name });
+        
+        // Auto mappings
+        const mappings: Record<string, number> = {};
+        const fields = importType === 'po' ? PO_FIELDS : importType === 'shp' ? SHP_FIELDS : MRP_FIELDS;
+        
+        fields.forEach(f => {
+          const foundIdx = headers.findIndex(h =>
+            f.hints.some(hint => h.toLowerCase().includes(hint))
+          );
+          if (foundIdx !== -1) {
+            mappings[f.key] = foundIdx;
+          }
+        });
+        
+        setColMappings(mappings);
+        setShowMapper(true);
+        setPoSheetSelOpen(false);
+      } else {
+        setPoSheetSelOpen(true);
+      }
     } catch (err: any) {
       triggerToast(`❌ Lỗi đọc file: ${err.message}`);
     }
@@ -655,7 +691,7 @@ export const POTracking: React.FC<POTrackingProps> = ({
   const loadExcelSheetData = () => {
     if (!tempWorkBook || !selectedSheet) return;
     const ws = tempWorkBook.Sheets[selectedSheet];
-    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd', defval: '' });
     
     if (data.length === 0) {
       triggerToast('⚠ Sheet này rỗng!');
@@ -754,10 +790,11 @@ export const POTracking: React.FC<POTrackingProps> = ({
         const colorCN = getV('colorCN');
         const unit = getV('unit', 'SF');
         
-        // Add line if matNo is unique in this PO lines
-        if (matNo && !po.lines.some(l => l.matNo === matNo)) {
+        // Add line if matNo is unique in this PO lines, otherwise update the existing line
+        if (matNo) {
+          const existingLineIdx = po.lines.findIndex(l => l.matNo === matNo);
           const parsed = parseERPMatName(matName, matNo);
-          po.lines.push({
+          const lineData = {
             matNo,
             matFull: matName,
             thickness: parsed.thickness || getV('thickness'),
@@ -772,8 +809,13 @@ export const POTracking: React.FC<POTrackingProps> = ({
             allowanceQty: getN('allowQty'),
             amount: getN('amount', qty * price),
             currency: 'USD',
-            stockInQty: 0
-          });
+            stockInQty: existingLineIdx >= 0 ? po.lines[existingLineIdx].stockInQty : 0
+          };
+          if (existingLineIdx >= 0) {
+            po.lines[existingLineIdx] = lineData;
+          } else {
+            po.lines.push(lineData);
+          }
         }
       });
 
@@ -892,18 +934,25 @@ export const POTracking: React.FC<POTrackingProps> = ({
 
         const po = posMap[pono];
         const parsed = parseERPMatName(matName, matNo);
-        if (!po.lines.some(l => l.matNo === matNo)) {
-          po.lines.push({
+        if (matNo) {
+          const existingLineIdx = po.lines.findIndex(l => l.matNo === matNo);
+          const lineData = {
             matNo, matFull: matName,
             thickness: parsed.thickness || '',
             matCN: parsed.matCN || matName,
             matEN: parsed.matEN || matName,
             colorCN: parsed.colorCN || getV('colorCN'),
             colorEN: parsed.colorEN || getV('colorEN'),
-            sizeRange: parsed.sizeRange || '', specNotes: '',
+            sizeRange: parsed.sizeRange || '', specNotes: 'MRP Import',
             unit: parsed.unit || 'SF',
-            poQty: qty, allowanceQty: 0, amount: 0, currency: 'USD', stockInQty: 0
-          });
+            poQty: qty, allowanceQty: 0, amount: 0, currency: 'USD',
+            stockInQty: existingLineIdx >= 0 ? po.lines[existingLineIdx].stockInQty : 0
+          };
+          if (existingLineIdx >= 0) {
+            po.lines[existingLineIdx] = lineData;
+          } else {
+            po.lines.push(lineData);
+          }
         }
       });
 
