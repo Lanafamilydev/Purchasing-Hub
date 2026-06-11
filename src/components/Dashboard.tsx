@@ -229,7 +229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               📊 Top 5 NCC theo sản lượng (Đặt hàng vs Nhập kho)
             </div>
             <div style={{ width: '100%', height: '240px' }}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <BarChart data={chartSupplierData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--brd)" />
                   <XAxis dataKey="name" stroke="var(--txt3)" style={{ fontSize: 9 }} />
@@ -251,7 +251,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {chartRiskData.length > 0 ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' }}>
                 <div style={{ width: '150px', height: '150px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <PieChart>
                       <Pie
                         data={chartRiskData}

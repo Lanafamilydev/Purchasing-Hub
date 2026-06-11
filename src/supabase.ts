@@ -24,13 +24,13 @@ export async function syncPODataToCloud(poList: any[]): Promise<boolean> {
     }));
 
     let result = await supabase
-      .from('po_tracking_samples')
+      .from('purchase_orders')
       .upsert(payload, { onConflict: 'po_no' });
     let { error } = result;
 
     if (error) {
       console.warn('Supabase upsert failed, retrying insert if possible:', formatSupabaseError(error));
-      result = await supabase.from('po_tracking_samples').insert(payload);
+      result = await supabase.from('purchase_orders').insert(payload);
       error = result.error;
     }
 
@@ -49,7 +49,7 @@ export async function syncPODataToCloud(poList: any[]): Promise<boolean> {
 export async function fetchPODataFromCloud(): Promise<any[] | null> {
   try {
     const { data, error } = await supabase
-      .from('po_tracking_samples')
+      .from('purchase_orders')
       .select('*')
       .order('po_no', { ascending: false });
 
