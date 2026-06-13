@@ -29,7 +29,7 @@ export const Auth: React.FC = () => {
 
     if (isSignUp) {
       if (!validateEmail(trimmedEmail)) {
-        setError('Chỉ chấp nhận tài khoản email thuộc tên miền Properwell (@properwell.com hoặc @properwell.com.vn).');
+        setError('Chỉ chấp nhận tài khoản email thuộc tên miền Properwell (@properwell.com.cn hoặc @properwell.com.vn).');
         return;
       }
       if (password.length < 6) {
@@ -143,7 +143,7 @@ export const Auth: React.FC = () => {
               <Mail size={14} className="auth-input-icon" />
               <input
                 type="email"
-                placeholder="name@properwell.com"
+                placeholder="name@properwell.com.vn"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
@@ -151,7 +151,7 @@ export const Auth: React.FC = () => {
               />
             </div>
             {isSignUp && (
-              <span className="auth-hint">Chỉ hỗ trợ @properwell.com &amp; @properwell.com.vn</span>
+              <span className="auth-hint">Chỉ hỗ trợ @properwell.com.vn &amp; @properwell.com.cn</span>
             )}
           </div>
 

@@ -62,8 +62,8 @@ export const MaterialTracking: React.FC<MaterialTrackingProps> = ({ coordData })
     if (!m.eta) return m.purchase_qty > 0 ? 'warn' : 'ok';
     const gap = daysBetween(lineUpDate, m.eta);
     if (gap === null) return 'warn';
-    if (gap < 0) return 'risk';
-    if (gap < 7) return 'warn';
+    if (gap < 14) return 'risk';
+    if (gap < 25) return 'warn';
     return 'ok';
   };
 
@@ -138,7 +138,7 @@ export const MaterialTracking: React.FC<MaterialTrackingProps> = ({ coordData })
                   const risk = calcMatRisk(m, o.line_up_date);
                   const gap = m.eta ? daysBetween(o.line_up_date, m.eta) : null;
                   const gapStr = gap === null ? '—' : gap < 0 ? `${gap}d` : gap === 0 ? '0d' : `+${gap}d`;
-                  const gapCls = gap === null ? 'days-na' : gap < 0 ? 'days-risk' : gap < 7 ? 'days-warn' : 'days-ok';
+                  const gapCls = gap === null ? 'days-na' : gap < 14 ? 'days-risk' : gap < 21 ? 'days-warn' : 'days-ok';
                   const stockPct = m.purchase_qty > 0 ? Math.min(100, (m.stock_in_qty / m.purchase_qty) * 100) : 0;
                   const stockCls = stockPct >= 100 ? 'sf-ok' : stockPct > 0 ? 'sf-warn' : 'sf-risk';
                   
@@ -146,9 +146,9 @@ export const MaterialTracking: React.FC<MaterialTrackingProps> = ({ coordData })
                     <span className="eta-chip eta-stocked">✅ In stock</span>
                   ) : !m.eta ? (
                     <span className="eta-chip eta-none">—</span>
-                  ) : gap !== null && gap < 0 ? (
+                  ) : gap !== null && gap < 14 ? (
                     <span className="eta-chip eta-risk">{fDate(m.eta)}</span>
-                  ) : gap !== null && gap < 7 ? (
+                  ) : gap !== null && gap < 21 ? (
                     <span className="eta-chip eta-warn">{fDate(m.eta)}</span>
                   ) : (
                     <span className="eta-chip eta-ok">{fDate(m.eta)}</span>
@@ -273,9 +273,9 @@ export const MaterialTracking: React.FC<MaterialTrackingProps> = ({ coordData })
               
               const gapHtml = gap === null ? (
                 <span className="days-na">—</span>
-              ) : gap < 0 ? (
+              ) : gap < 14 ? (
                 <span className="days-risk">{gap}d !</span>
-              ) : gap < 7 ? (
+              ) : gap < 21 ? (
                 <span className="days-warn">+{gap}d</span>
               ) : (
                 <span className="days-ok">+{gap}d</span>
