@@ -4,6 +4,14 @@ export function fixDate(d: any): string {
   if (!d) return '';
   if (d instanceof Date) return d.toISOString().slice(0, 10);
   
+  const num = Number(d);
+  if (!isNaN(num) && num > 30000 && num < 60000) {
+    const date = new Date((num - 25569) * 86400 * 1000);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().slice(0, 10);
+    }
+  }
+  
   let s = String(d).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   
